@@ -1,0 +1,15 @@
+$ ros2 topic list --no-daemon
+/parameter_events
+/rosout
+/uav/armed
+/uav/cmd_pos
+/uav/cmd_vel
+/uav/gps/fix
+/uav/imu
+/uav/mode
+/uav/odom
+/uav/telemetry
+
+$ ros2 topic echo --once /uav/telemetry
+data: '{"stamp": 1790768592.3089125, "fc_time_boot_ms": 20198, "frame": "ENU (x East, y North, z Up), body FLU, origin = simulation/map origin", "position_enu": [-0.002688093576580286, 3.830167293548584, 5.1715216636657715], "velocity_enu": [-0.00044967769645154476, -0.02554076723754406, -0.01659504510462284], "orientation_xyzw_enu_flu": [0.0002331735788875787, 0.001541369567004021, 0.707554700987351, 0.7066568579732603], "position_ned": [3.830167293548584, -0.002688093576580286, -5.1715216636657715], "velocity_ned": [-0.02554076723754406, -0.00044967769645154476, 0.01659504510462284], "roll_pitch_yaw_ned_frd": [0.00251076091080904, -0.0018484736792743206, -0.001272063935175538], "gps": {"lat": 30.0000346, "lon": 76.0, "alt": 255.171}, "mode": "OFFBOARD", "armed": true, "system_status": 4, "battery_v": 24.53, "battery_pct": 94, "motor_rpm": [6037.32373046875, 6030.72119140625, 6032.0810546875, 6032.74658203125], "setpoints_sent": 382, "cmd_rejected": 0}'
+---

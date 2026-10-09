@@ -1,3 +1,9 @@
+## Simulation (PyBullet + MAVLink flight controller)
+
+> **Full simulation package, logs and demo videos (~1.6 GB): [Google Drive](https://drive.google.com/drive/folders/1TbNsKPQbstPiMwV3SNGc97JoBD26sBK-)**
+>
+> The code is in [disaster_uav_pybullet_mavlink_fc/](disaster_uav_pybullet_mavlink_fc). Its `logs/` folder (run outputs and demo videos) is too large for GitHub, so it is only on Drive.
+
 # Drone SLAM + Human Finder (RealSense D435i/D455 + Jetson Orin)
 
 **How it works:** record during the flight → after landing, ORB-SLAM3 builds the map, YOLO finds people,

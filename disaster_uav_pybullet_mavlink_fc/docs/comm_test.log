@@ -1,0 +1,22 @@
+[17:12:51] python C:\Users\Chaitra Rane\mm\root\envs\uavros\python.exe; output C:\Users\Chaitra Rane\disaster_uav_pybullet_mavlink_fc\logs\validation\20260930_170749\comm_test
+[17:12:52] STEP  1 PASS  PyBullet + simulated FC MAVLink server started  |  pid 78136, udpin:0.0.0.0:14540, world=earthquake scene
+[17:12:52] STEP  2 PASS  ROS 2 <-> MAVLink bridge node started  |  pid 75228, connection udp:127.0.0.1:14540
+[17:12:53] STEP  3 PASS  HEARTBEAT received from FC  |  bridge log: 'FC heartbeat received (sys 1)'; /uav/mode publishing
+[17:12:56] STEP  4 PASS  telemetry received (/uav/telemetry, /uav/odom, /uav/imu, /uav/gps/fix)  |  telemetry 30.5 Hz, odom n=91, imu n=315, gps n=30, mode=HOLD, armed=False
+[17:12:56] reverse telemetry check (ground): ROS ENU [-0.023 -2.997  0.128] vs PyBullet truth [-0.    -3.     0.145]
+[17:12:56] STEP  5 PASS  arm command sent (ROS service /uav/arm -> MAVLink COMMAND_LONG)  |  service: success=True message=MAV_RESULT=0; telemetry armed=True
+[17:12:56] STEP  6 PASS  COMMAND_ACK verified  |  ROS response MAV_RESULT=0 (ACCEPTED); FC log: 'TX COMMAND_ACK command=400 result=0'
+[17:12:58] STEP  7 PASS  setpoints streamed continuously by the bridge (offboard-style)  |  20.4 Hz measured from bridge counter (configured 20 Hz)
+[17:12:59] STEP  8 PASS  OFFBOARD mode accepted  |  service success=True, telemetry mode=OFFBOARD
+[17:13:04] STEP  9 PASS  vehicle responds physically to /uav/cmd_vel (climb)  |  PyBullet altitude +4.74 m, vD=-1.02 m/s, total motor thrust 21.9 N; ROS telemetry z=4.86
+[17:13:09] STEP 10 PASS  velocity command changed -> acceleration + displacement observed  |  ENU +y (North) cmd 1.5 m/s: displacement 5.49 m, initial accel 1.28 m/s^2, final vN=1.52 m/s, pitch -0.9 deg (nose-down)
+[17:13:09] reverse telemetry check (flight): ROS ENU [0.   2.46 5.18] vs PyBullet truth [0.   2.49 5.18] (|diff|=0.024 m)
+[17:13:21] STEP 11 PASS  ros2 CLI: topic list / echo / pub cause real motion  |  `ros2 topic list` shows /uav/cmd_vel + /uav/telemetry=True; `topic echo --once /uav/telemetry` returned JSON=True; `ros2 topic pub /uav/cmd_vel linear.x=1.5 (East)` -> PyBullet East displacement 4.57 m
+[17:13:22] STEP 12 PASS  stop commands (setpoint stream stopped)  |  speed at stop 1.50 m/s; setpoint streaming OFF
+[17:13:29] STEP 13 PASS  failsafe / hold when setpoints stop  |  mode FAILSAFE_HOLD after 0.77 s (FC timeout 0.5 s + telemetry latency); speed 1.50->0.01 m/s; still airborne z=5.16 m; FC log: 'Failsafe: OFFBOARD_SETPOINT_LOSS'
+[17:13:42] STEP 14 PASS  land command -> vehicle descends and lands  |  LAND accepted=True; landed flag=True, altitude 0.15 m
+[17:13:42] STEP 15 PASS  disarm  |  service success=True MAV_RESULT=0
+[17:13:43] STEP 16 PASS  motor thrust falls after disarm  |  armed=False, total thrust 0.000 N (hover ~21.6 N), max rpm 0; ROS telemetry armed=False
+[17:13:44] FC MAVLink rx counts: {'HEARTBEAT': 52, 'SET_POSITION_TARGET_LOCAL_NED': 876, 'COMMAND_LONG': 4}
+[17:13:44] FC MAVLink tx counts: {'HEARTBEAT': 99, 'LOCAL_POSITION_NED': 1471, 'ATTITUDE': 2451, 'GLOBAL_POSITION_INT': 491, 'SYS_STATUS': 99, 'HIGHRES_IMU': 4901, 'RAW_RPM': 1964, 'ACTUATOR_OUTPUT_STATUS': 491, 'GPS_RAW_INT': 490, 'COMMAND_ACK': 4, 'STATUSTEXT': 5}
+[17:13:44] OVERALL: PASS  (16/16 steps)

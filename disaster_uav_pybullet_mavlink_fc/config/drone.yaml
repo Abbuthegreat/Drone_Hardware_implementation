@@ -1,0 +1,471 @@
+# =============================================================================
+# drone.yaml  --  single source of truth for the simulated UAV.
+#
+# Conventions: SI units. Body frame in this file = URDF base_link frame = FLU
+# (x forward, y left, z up). MAVLink/FC world frame = NED, PyBullet world = ENU.
+#
+# Every value tagged [PLACEHOLDER] is an engineering assumption, NOT a measurement of the
+# physical S3110 / propeller / battery. Replace them with bench data using the tools in
+# calibration/ (see README "Calibration workflow").
+# Every value tagged [DATASHEET] comes from the hardware notes supplied with the project.
+# Every value tagged [DERIVED] is written by `python -m tools.build_urdf` - do not hand-edit.
+# =============================================================================
+schema_version: 2
+
+vehicle:
+  name: disaster_response_uav
+  mass_kg: 2.2                      # [DATASHEET] all-up target mass
+  gravity_mps2: 9.81                # used for hover checks (2.2 * 9.81 = 21.582 N)
+  frame: X quadrotor, custom carbon fibre
+  arm_length_m: 0.30                # [PLACEHOLDER] motor centre -> vehicle centre (frame size not specified)
+  motor_model: Surpass Hobby S3110 800KV
+  esc: 4-in-1 ESC
+  flight_controller: Pixhawk 6C Mini
+  companion: Raspberry Pi 5 8GB
+  gps: Matek 3901-10X
+  camera: RGB-D (D435-class interface, no LiDAR)
+
+# -----------------------------------------------------------------------------
+# Mass budget / geometry.  build_urdf.py turns this table into urdf/disaster_uav.urdf.
+# Positions are in the base_link frame (x fwd, y left, z up). base_link origin = frame centre, at
+# the motor-plane height. The composite CG is computed (see `mass_properties`).
+# Component masses are [PLACEHOLDER] except that they must sum to vehicle.mass_kg (checked by tests).
+# -----------------------------------------------------------------------------
+components:
+  # base_link is a 1 g reference node at the frame centre (PyBullet's fixed-link merge ignores an offset
+  # inertial origin on the root link, so the airframe mass lives in airframe_link below).
+  base_link: {mass_kg: 0.001, size_m: [0.01, 0.01, 0.01]}
+  # Carbon frame is described by primitives so its inertia is derived, not guessed.
+  airframe_primitives:
+    # 2 carbon plates (centre body)
+    - {name: plate_top,    kind: box, mass_kg: 0.1195, size_m: [0.24, 0.14, 0.004], xyz: [0, 0,  0.025]}
+    - {name: plate_bottom, kind: box, mass_kg: 0.1195, size_m: [0.24, 0.14, 0.004], xyz: [0, 0, -0.025]}
+    # 4 arms (thin rods from centre to motor), 45 deg in X configuration
+    - {name: arm_front_right, kind: rod, mass_kg: 0.090, from_xyz: [0, 0, 0], to_xyz: [ 0.2121, -0.2121, 0]}
+    - {name: arm_rear_left,   kind: rod, mass_kg: 0.090, from_xyz: [0, 0, 0], to_xyz: [-0.2121,  0.2121, 0]}
+    - {name: arm_front_left,  kind: rod, mass_kg: 0.090, from_xyz: [0, 0, 0], to_xyz: [ 0.2121,  0.2121, 0]}
+    - {name: arm_rear_right,  kind: rod, mass_kg: 0.090, from_xyz: [0, 0, 0], to_xyz: [-0.2121, -0.2121, 0]}
+    # landing gear: 2 skids + 4 struts
+    - {name: skid_left,   kind: box, mass_kg: 0.050,  size_m: [0.34, 0.018, 0.012], xyz: [0,  0.11, -0.140]}
+    - {name: skid_right,  kind: box, mass_kg: 0.050,  size_m: [0.34, 0.018, 0.012], xyz: [0, -0.11, -0.140]}
+    - {name: strut_fl,    kind: box, mass_kg: 0.0175, size_m: [0.014, 0.014, 0.115], xyz: [ 0.12,  0.11, -0.0825]}
+    - {name: strut_fr,    kind: box, mass_kg: 0.0175, size_m: [0.014, 0.014, 0.115], xyz: [ 0.12, -0.11, -0.0825]}
+    - {name: strut_rl,    kind: box, mass_kg: 0.0175, size_m: [0.014, 0.014, 0.115], xyz: [-0.12,  0.11, -0.0825]}
+    - {name: strut_rr,    kind: box, mass_kg: 0.0175, size_m: [0.014, 0.014, 0.115], xyz: [-0.12, -0.11, -0.0825]}
+
+  flight_controller_link: {mass_kg: 0.070, size_m: [0.055, 0.040, 0.012], xyz: [0.0, 0.0, 0.035], rpy: [0, 0, 0]}
+  raspberry_pi_link:      {mass_kg: 0.070, size_m: [0.086, 0.056, 0.018], xyz: [-0.075, 0.0, 0.038], rpy: [0, 0, 0]}
+  esc_link:               {mass_kg: 0.142, size_m: [0.060, 0.050, 0.012], xyz: [0.0, 0.0, 0.0], rpy: [0, 0, 0]}
+  # GPS on a mast, aft and high, as far from the Pi / ESC as the airframe allows.
+  gps_link:               {mass_kg: 0.030, radius_m: 0.022, length_m: 0.012, xyz: [-0.110, 0.0, 0.200], rpy: [0, 0, 0]}
+  # Battery: x is solved by build_urdf so the composite CG x-coordinate is 0 ("auto").
+  battery_link:           {mass_kg: 0.650, size_m: [0.155, 0.070, 0.055], xyz: [auto, 0.0, -0.0575], rpy: [0, 0, 0]}
+  # RGB-D camera: pitched down 10 degrees (rotation about +y in FLU tilts the nose down).
+  rgbd_camera_link:       {mass_kg: 0.090, size_m: [0.025, 0.090, 0.025], xyz: [0.190, 0.0, -0.005], rpy_deg: [0.0, 10.0, 0.0]}
+
+  # Thermal camera (Lepton/Boson class module) beside the RGB-D camera, same 10 deg pitch. 30 g taken from the ESC/wiring allowance.
+  thermal_camera_link:    {mass_kg: 0.030, size_m: [0.020, 0.030, 0.020], xyz: [0.185, 0.060, 0.022], rpy_deg: [0.0, 10.0, 0.0]}
+
+  # Motors: numbering follows the PX4 quad-X convention so hardware motor outputs map 1:1.
+  #   1 front-right CCW | 2 rear-left CCW | 3 front-left CW | 4 rear-right CW   (spin seen from above)
+  motor:   {mass_kg: 0.080, radius_m: 0.0175, length_m: 0.030}
+  rotor:   {mass_kg: 0.007, radius_m: 0.140, thickness_m: 0.004, z_above_motor_m: 0.022}
+  motors:
+    - {index: 1, name: front_right, xy: [ 0.2121, -0.2121], spin: CCW}
+    - {index: 2, name: rear_left,   xy: [-0.2121,  0.2121], spin: CCW}
+    - {index: 3, name: front_left,  xy: [ 0.2121,  0.2121], spin: CW}
+    - {index: 4, name: rear_right,  xy: [-0.2121, -0.2121], spin: CW}
+
+# BEGIN DERIVED mass_properties (written by tools/build_urdf.py)
+mass_properties:
+  total_mass_kg: 2.200000
+  battery_x_solved_m: -0.021692      # battery x chosen so the composite CG x = 0
+  cg_in_base_link_m: [0.000000, 0.000818, -0.020552]
+  inertia_about_cg_kgm2:          # base_link axes (FLU), origin at the CG
+    Ixx: 0.029662
+    Iyy: 0.036587
+    Izz: 0.055250
+    Ixy: -0.000333
+    Ixz: 0.000012
+    Iyz: -0.000077
+sensor_extrinsics:                 # DERIVED from the URDF; body frame FLU, origin at the CG
+  rgbd_optical:
+    xyz_body_flu_m: [0.19, -0.000818, 0.015552]
+    R_body_from_optical: [[0.0, -0.173648, 0.984808], [-1.0, 0.0, 0.0], [0.0, -0.984808, -0.173648]]   # optical (z fwd, x right, y down) -> body FLU
+  thermal_optical:
+    xyz_body_flu_m: [0.185, 0.059182, 0.042552]
+    R_body_from_optical: [[0.0, -0.173648, 0.984808], [-1.0, 0.0, 0.0], [0.0, -0.984808, -0.173648]]   # optical (z fwd, x right, y down) -> body FLU
+  imu:
+    xyz_body_flu_m: [-0.0, -0.000818, 0.055552]
+  gps:
+    xyz_body_flu_m: [-0.11, -0.000818, 0.220552]
+# END DERIVED mass_properties
+
+# -----------------------------------------------------------------------------
+# Propulsion. T = kT*w^2 , Q = kQ*w^2 , w in rad/s.  [PLACEHOLDER] -- no bench data yet.
+# -----------------------------------------------------------------------------
+propulsion:
+  motor_kv_rpm_per_v: 800                     # [DATASHEET] NO-LOAD speed constant. Not a loaded propeller RPM.
+  max_loaded_rpm_at_nominal_v: 9000.0         # [PLACEHOLDER] loaded propeller RPM at 22.2 V, full command
+  idle_rpm: 900.0                             # [PLACEHOLDER] armed idle spin at command 0
+  thrust_coeff_kT: 1.351e-5                   # [PLACEHOLDER] N / (rad/s)^2  (=> ~12 N/motor at max rpm)
+  torque_coeff_kQ: 2.027e-7                   # [PLACEHOLDER] N*m / (rad/s)^2  (kQ/kT = 0.015 m)
+  motor_time_constant_s: 0.045                # [PLACEHOLDER] first-order motor+ESC lag, d(w)/dt = (w_cmd-w)/tau
+  command_expo: 1.0                           # [PLACEHOLDER] w_cmd = w_idle + (w_max(V)-w_idle) * u**expo
+  esc_motor_efficiency: 0.70                  # [PLACEHOLDER] shaft power / electrical power
+  avionics_power_w: 12.0                      # [PLACEHOLDER] Pi 5 + Pixhawk + GPS + camera
+  voltage_compensation: true                  # FC scales the command by measured battery voltage
+
+# -----------------------------------------------------------------------------
+# Battery: 6S, 8400 mAh.  Open-circuit voltage from SOC table, sag = I * R_internal.
+# -----------------------------------------------------------------------------
+battery:
+  capacity_mah: 8400                          # [DATASHEET]
+  cells: 6                                    # [DATASHEET]
+  min_v: 19.2                                 # [DATASHEET]
+  nominal_v: 22.2                             # [DATASHEET]
+  max_v: 25.2                                 # [DATASHEET]
+  initial_soc: 0.95
+  internal_resistance_ohm: 0.030              # [PLACEHOLDER] whole pack
+  ocv_soc_points:      [0.00, 0.10, 0.30, 0.50, 0.80, 1.00]   # [PLACEHOLDER] per-cell open circuit voltage curve
+  ocv_cell_v_points:   [3.20, 3.50, 3.65, 3.75, 4.02, 4.20]
+  low_voltage_warn_v: 21.0
+  failsafe_voltage_v: 20.4                    # filtered *loaded* voltage that triggers battery failsafe (LAND)
+  failsafe_soc: 0.15
+  min_safe_voltage_v: 19.2                    # arming is refused below this open-circuit voltage
+  voltage_filter_tau_s: 1.0
+
+# -----------------------------------------------------------------------------
+# Aerodynamics [PLACEHOLDER]. F = -(k1 + k2*|v_air|) * v_air  (body frame, per axis group)
+#                              tau = -(c1 + c2*|w|) * w
+# -----------------------------------------------------------------------------
+aero:
+  drag_linear_xy: 0.18          # N/(m/s)   rotor-drag-like term
+  drag_quad_xy: 0.030           # N/(m/s)^2 = 0.5*rho*CdA
+  drag_linear_z: 0.30
+  drag_quad_z: 0.060
+  ang_drag_linear: 0.002        # N*m/(rad/s)
+  ang_drag_quad: 0.0005         # N*m/(rad/s)^2
+  wind_ned_mps: [0.0, 0.0, 0.0]
+
+# -----------------------------------------------------------------------------
+# Simulated flight controller  (NOT PX4).  Gains were tuned against this model in the order
+# thrust -> attitude -> yaw -> velocity -> position (see calibration/tune_controller.py and logs/).
+# -----------------------------------------------------------------------------
+flight_controller:
+  control_hz: 250
+  offboard_timeout_s: 0.5         # setpoint-loss watchdog of THIS simulator. (PX4's COM_OF_LOSS_T default is 1.0 s; verify on your own firmware.)
+  failsafe_land_after_s: 20.0     # 0 = stay in FAILSAFE_HOLD forever
+  offboard_entry_requires_stream: true
+  limits:
+    max_vel_xy_mps: 5.0
+    max_climb_mps: 2.0
+    max_descend_mps: 1.5
+    max_yaw_rate_rps: 1.5
+    max_tilt_deg: 35.0
+    max_accel_xy_mps2: 6.0
+    land_speed_mps: 0.5
+    max_rate_rps: [4.0, 4.0, 2.0]
+  position:
+    kp: [0.9, 0.9, 1.2]
+  velocity:
+    kp: [2.5, 2.5, 4.0]
+    ki: [0.4, 0.4, 1.0]
+    kd: [0.0, 0.0, 0.0]
+    i_limit: [1.5, 1.5, 3.0]                # m/s^2
+  attitude:
+    kp: [6.0, 6.0, 3.0]
+  rate:
+    kp: [14.0, 14.0, 8.0]                   # rad/s^2 per rad/s of rate error (torque = I * ...)
+    ki: [4.0, 4.0, 2.0]
+    kd: [0.15, 0.15, 0.0]
+    i_limit: [1.0, 1.0, 0.5]                # rad/s^2 (angular-acceleration demand)
+    gyro_lpf_hz: 60.0
+    dterm_lpf_hz: 30.0
+  model_inertia_scale: 1.0                  # FC's assumed inertia = scale * true inertia
+  landed:
+    alt_threshold_m: 0.15
+    vel_threshold_mps: 0.3
+    land_detect_time_s: 1.0
+  estimator:                                # FC on-board estimator is NOT modelled; truth + these errors
+    pos_sigma_m: 0.01
+    vel_sigma_mps: 0.02
+    att_sigma_rad: 0.002
+
+# -----------------------------------------------------------------------------
+# Sensors
+# -----------------------------------------------------------------------------
+sensors:
+  imu:
+    rate_hz: 250                            # must divide sim.physics_hz
+    # Noise densities are ICM-42688-class datasheet-order values [PLACEHOLDER]; vibration is not modelled.
+    gyro_noise_density: 5.0e-5              # rad/s/sqrt(Hz)
+    accel_noise_density: 7.0e-4             # m/s^2/sqrt(Hz)
+    gyro_bias_initial_sigma: 0.002          # rad/s   (1-sigma of the turn-on bias)
+    accel_bias_initial_sigma: 0.02          # m/s^2
+    gyro_bias_random_walk: 5.0e-6           # rad/s/sqrt(s)
+    accel_bias_random_walk: 5.0e-5          # m/s^2/sqrt(s)
+    gyro_range_rps: 34.9                    # +-2000 deg/s
+    accel_range_mps2: 156.9                 # +-16 g
+    seed: 1
+  gps:
+    rate_hz: 10
+    horizontal_sigma_m: 0.6                 # [PLACEHOLDER] Matek 3901-10X class (u-blox M10)
+    vertical_sigma_m: 1.0
+    velocity_sigma_mps: 0.05
+    correlation_time_s: 30.0                # Gauss-Markov correlation time of the position error
+    satellites: 16
+    hdop: 0.7
+    mode: healthy                           # healthy | degraded | denied
+    degraded_sigma_scale: 5.0
+    degraded_satellites: 6
+    dropouts: []                            # list of [t_start_s, t_end_s] windows with no fix
+    seed: 2
+  camera:
+    width: 640
+    height: 480
+    vfov_deg: 58.0                          # vertical FOV (D435 depth ~58 deg). hfov/fx/fy/cx/cy are derived.
+    near_m: 0.2
+    far_m: 12.0
+    depth_noise_sigma_per_m2: 0.001         # sigma_z = coeff * z^2 (0 disables)
+    rate_hz: 5                              # RGB-D / thermal frame rate. Software rendering (~0.25 s per 640x480 frame) makes 15 Hz impossible in real time
+    seed: 3
+  thermal:
+    # SYNTHETIC thermal camera: PyBullet has no radiometry. Temperatures come from a per-object table (skin 34 C, clothing 29 C,
+    # ground/debris ~12-22 C, fire ~450 C, sky -20 C) rendered through the real camera geometry via a segmentation pass.
+    # Encoding: 32FC1 degrees Celsius. NOT a physically calibrated sensor.
+    width: 160
+    height: 120
+    vfov_deg: 44.0                          # Lepton-3.5 class (57 x 44 deg)
+    near_m: 0.3
+    far_m: 30.0
+    netd_c: 0.05                            # noise-equivalent temperature difference, Celsius
+    blur_sigma_px: 0.8
+    ambient_c: 16.0
+    sky_c: -20.0
+    ground_variation_c: 3.0                 # sun/shade modulation from scene brightness
+    seed: 5
+
+# -----------------------------------------------------------------------------
+# Geographic reference (map frame <-> lat/lon). See common/geo.py.
+# -----------------------------------------------------------------------------
+geo:
+  origin_lat_deg: 30.000000     # [PLACEHOLDER] replace with the real test-site origin
+  origin_lon_deg: 76.000000
+  origin_alt_m: 250.0           # ground altitude at the map origin
+
+mavlink:
+  udp_port: 14540
+  fc_bind: "udpin:0.0.0.0:14540"
+  companion_connection: "udp:127.0.0.1:14540"   # translated to udpout: by CompanionMavlink (see README)
+  sys_id: 1
+  comp_id: 1
+  companion_sys_id: 255
+  companion_comp_id: 191                        # MAV_COMP_ID_ONBOARD_COMPUTER
+  heartbeat_hz: 2.0
+  rates_hz:                                     # FC -> companion telemetry streams
+    local_position_ned: 30
+    attitude: 50
+    global_position_int: 10
+    sys_status: 2
+    highres_imu: 100
+    gps_raw_int: 10
+    raw_rpm: 10
+
+sim:
+  physics_hz: 500
+  realtime: true
+  realtime_factor: 1.0            # <1 runs slower than wall clock (demo uses 0.5 because rendering is slow)
+  eval_udp_port: 14560            # evaluation-only ground-truth stream (never used by autonomy)
+  log_hz: 50
+
+spawn:
+  xy_enu_m: [0.0, -3.0]           # start pad on the road
+  yaw_ned_deg: 0.0                # heading North
+  surface_z_m: 0.02               # top of the road slab the vehicle starts on
+  height_above_ground_m: 0.0      # extra height above that surface (0 = resting on the landing gear)
+
+world:
+  size_m: [80, 80]
+  ground_z: 0.0
+  debris_count: 70
+  seed: 26
+  humans:                         # sim-world only. NEVER exposed to the autonomy stack.
+    - {id: S1, xy: [ 4.6, 11.5], posture: standing, yaw_deg: 215}
+    - {id: S2, xy: [-8.5, 24.0], posture: sitting,  yaw_deg: 110}
+    - {id: S3, xy: [ 9.0, -9.0], posture: lying,    yaw_deg: 40}     # off the mission route: RGB-detector-hard, for thermal tests
+  demo_obstacles:                 # deterministic disaster features on the demo route (kind: box|cyl)
+    - {name: leaning_wall,   kind: box, xyz: [0.8, 4.5, 1.5],  half: [2.3, 0.25, 1.5], rpy_deg: [0, 0, 0],   tex: concrete}
+    - {name: wall_rubble_e,  kind: box, xyz: [4.4, 4.6, 0.8],  half: [1.2, 0.9, 0.8],  rpy_deg: [8, -6, 25], tex: brick}
+    - {name: hidden_pole,    kind: cyl, xyz: [-0.9, 8.6, 2.6], radius: 0.22, height: 5.2, rpy_deg: [0, 0, 0], tex: wood}
+    - {name: fallen_slab,    kind: box, xyz: [-6.0, 14.0, 1.0], half: [2.4, 0.35, 1.0], rpy_deg: [0, 12, 70], tex: concrete}
+    - {name: wreck_truck,    kind: box, xyz: [8.5, 17.5, 1.3], half: [2.6, 1.1, 1.3],  rpy_deg: [0, 0, 20], tex: rust}
+    - {name: broken_column,  kind: cyl, xyz: [1.5, 21.0, 1.6], radius: 0.4, height: 3.2, rpy_deg: [6, 0, 0], tex: concrete}
+  hazards:                        # heat/fire hazards (visual + thermal signature)
+    - {id: F1, kind: fire, xy: [-3.0, 17.0], radius_m: 1.3, temp_c: 450.0}
+  route_clear_corridor_m: 2.0     # random debris keeps out of this distance from the mission polyline
+  scenario: static                # static | dynamic   (`--scenario dynamic` on sim.run_fc_sim / scripts/run_disaster_demo.py)
+  dynamic_obstacles:              # used only in the dynamic scenario. WORLD coordinates (ENU, spawn pad at [0, -3]). Sim-world only.
+    # secondary collapse across the WP3 -> WP4 leg: falls when the UAV is within 4.8 m of its centre but still > 2.0 m from its footprint
+    - {name: aftershock_slab, kind: collapse, xyz: [-4.0, 22.6, 1.6], half: [1.6, 0.25, 1.6], rpy_deg: [0, 0, 50],
+       trigger_radius_m: 4.8, min_clearance_m: 2.0, drop_height_m: 3.5, fall_s: 0.8, tex: concrete}
+    # debris sliding back and forth across the WP2 -> WP3 corridor (0.2 m/s, 3 s pause at each end)
+    - {name: sliding_debris, kind: patrol, a: [0.5, 16.2], b: [2.5, 17.8], half: [0.35, 0.35, 1.4], rpy_deg: [0, 0, 40],
+       speed_mps: 0.2, dwell_s: 3.0, phase_s: 0.0, tex: rust}
+
+# =============================================================================
+# Autonomous disaster-response demo (SLAM + perception + geo-semantic map + A* + VFH+ + mission)
+# All coordinates in the "mission-local" frame unless stated: origin = take-off point, x = East, y = North, z = Up
+# (the SLAM map frame is initialised gravity-aligned and yaw-aligned to the FC heading at start, so this is ENU-like).
+# =============================================================================
+demo:
+  duration_limit_s: 300.0             # hard stop (simulation seconds); the mission (search + return + landing) normally ends well before
+  sim_rtf: 0.5                        # simulation real-time factor used by the demo launcher
+  flight_altitude_m: 2.0              # above the take-off surface
+  cruise_speed_mps: 1.0
+  slow_speed_mps: 0.5                 # near obstacles / after tracking loss
+  max_climb_mps: 0.8
+  max_yaw_rate_rps: 0.35              # ORB tracking dislikes fast yaw (kit README: keep < ~30 deg/s)
+  goal_tolerance_m: 0.7
+  takeoff_tolerance_m: 0.25
+  hold_after_mission_s: 6.0
+  search_waypoints_local:             # deterministic search regions (visited in order), then return to the take-off point
+    - {name: "WP1 debris gap",   xy: [ 0.0, 12.5]}
+    - {name: "WP2 region A",     xy: [ 4.0, 17.0]}
+    - {name: "WP3 region B",     xy: [-1.0, 23.0]}
+    - {name: "WP4 region C",     xy: [-7.0, 28.0]}
+  return_home: true                   # true: after the last search waypoint fly back to the take-off point (A* + VFH+ on the live map); false: stay over the last region
+  end_action: land                    # land | hold : what the vehicle does after the hold at the end of the mission (LAND is a MAVLink command to the FC)
+
+slam:
+  backend: orbslam3                   # orbslam3 (kit ORB-SLAM3 via slam/rgbd_stream, built by slam/build_orbslam3.sh) | orb_pnp_vo (pure-python fallback)
+  n_features: 1500
+  min_inliers: 25
+  reproj_error_px: 3.0
+  ratio_test: 0.8
+  max_depth_m: 8.0
+  min_depth_m: 0.4
+  keyframe_min_translation_m: 0.35
+  keyframe_min_rotation_deg: 8.0
+  keyframe_min_inlier_ratio: 0.5
+  n_keyframes_local_map: 6
+  lost_timeout_s: 1.5                 # no valid pose for this long -> status LOST
+  gravity_align_alpha: 0.02           # complementary filter gain pulling roll/pitch to the accelerometer gravity direction
+  imu_rotation_prior: true            # integrate the gyro between frames as the rotation prior for PnP
+  max_speed_mps: 2.0                  # orb_pnp_vo: reject poses implying a faster translation than this since the last good frame (+ jump_margin_m)
+  jump_margin_m: 0.15                 #   (protects against PnP locking onto a moving object; mission demo speeds are <= 1 m/s)
+  reinit_after_lost_s: 3.0            # orb_pnp_vo: lost this long (mission hovers meanwhile) -> re-initialise at the last accepted pose (logged)
+  reinit_min_features: 150
+  jump_purge_window_s: 0.5           # orb_pnp_vo: on a rejected jump, keyframes from this long before the last good frame are discarded (may contain the moving object)
+  init_still_s: 1.0                   # accelerometer averaging at start (drone on the ground, like record.py)
+  pose_topic_frame: slam_map
+
+perception:
+  yolo_model: slam_kit_3/slam_kit/models/yolov8n.onnx
+  yolo_conf: 0.35
+  yolo_iou: 0.5
+  yolo_backend: onnxruntime           # auto | ultralytics | onnxruntime | opencv (kit detector.py backends)
+  max_depth_m: 9.0                    # kit --max-depth (people farther than this are not localised)
+  min_valid_depth_px: 15              # kit localize(): minimum torso pixels with valid depth
+  max_depth_spread_m: 0.9             # reject a localisation when the torso depth patch (p90-p10) straddles several surfaces
+  thermal_human_min_c: 27.0           # skin/clothing surface temperatures of a person
+  thermal_human_max_c: 42.0
+  thermal_min_contrast_c: 6.0         # warmer than the local background by at least this
+  thermal_window_px: 4                # half window (thermal pixels) sampled around the projected 3-D point
+  thermal_boost: 0.25                 # confidence added when thermal supports the RGB detection
+  thermal_penalty: 0.15               # confidence removed when thermal contradicts a detection in view
+  thermal_only_min_blob_px: 30        # warm blobs without an RGB person only make a low-confidence candidate
+  hazard_fire_min_c: 120.0            # thermal hot-spot threshold for fire/hot debris
+  hazard_min_blob_px: 12
+  hazard_fire_rgb_hsv_lo: [5, 120, 150]     # orange/yellow flame colour
+  hazard_fire_rgb_hsv_hi: [35, 255, 255]
+
+survivors:
+  assoc_radius_m: 1.5                 # kit --radius
+  merge_radius_m: 2.5                 # tracks closer than this are the same person seen with biased depth (kit merges clusters < 0.8 * radius)
+  confirm_min_obs: 3                  # kit --min-obs
+  confirm_min_score: 1.6              # accumulated (confidence + thermal) score needed too
+  candidate_max_age_s: 20.0
+  min_conf: 0.35
+  filter_alpha: 0.3                   # running median/mean update of the position
+  base_sigma_m: 0.35                  # position uncertainty model: sigma = base + k * range^2
+  sigma_range_k: 0.02
+
+map:
+  voxel_m: 0.25
+  extent_local_m: [-25.0, 25.0, -12.0, 45.0]     # xmin, xmax, ymin, ymax of the metric map (local frame)
+  z_range_m: [-0.5, 5.0]
+  l_occ: 0.85
+  l_free: -0.35
+  l_min: -2.0
+  l_max: 3.5
+  occ_threshold: 0.8
+  free_threshold: -0.4
+  ray_stride_px: 12
+  max_ray_m: 9.0
+  free_ray_m: 7.0                      # no-return rays clear free space only up to this range (conservative)
+  band_half_m: 0.55                    # planning band around the flight altitude
+  surface_height_classes_m: [0.35, 1.2]   # ground / low debris / structure (surface semantic classes)
+  publish_hz: 2.0
+  dynamic_memory:                      # moving-obstacle memory (occupied -> later observed free = something moved there): keep the region blocked for planning
+    enabled: true
+    occ_l: 1.6                         # log-odds that counts as confidently occupied
+    min_cells: 3                       # ignore smaller cleared patches (noise)
+    hold_s: 90.0
+    radius_m: 0.6
+
+astar:
+  resolution_m: 0.25
+  clearance_m: 0.75                    # inflation radius = vehicle radius + margin (unknown is NOT free)
+  hazard_block_extra_m: 0.6
+  dynamic_mode: block                  # remembered moving-obstacle region (map.dynamic_memory): "block" = A* never enters it (measured: 0 collisions in 6/6 in-process dynamic runs), "penalty" = crossable at dynamic_penalty per cell (measured: collided 1 of 2)
+  dynamic_penalty: 6.0
+  turn_penalty: 0.15
+  max_nodes: 60000
+  replan_period_s: 1.0
+  replan_on_map_change: true
+  simplify: true
+
+vfh:
+  n_sectors: 72
+  active_radius_m: 3.5
+  a: 5.0                               # certainty-grid weighting a - b*d
+  b: 1.4
+  threshold_low: 1.2
+  threshold_high: 2.4
+  min_gap_sectors: 4
+  smoothing: 3
+  w_target: 5.0                        # cost weights (VFH+ style): target, previous heading, current heading
+  w_current: 2.0
+  w_prev: 2.0
+  block_radius_m: 1.6                  # obstacles inside this radius slow the vehicle
+
+nav:
+  control_hz: 10.0
+  carrot_lookahead_m: 1.6
+  stale_pose_s: 1.0
+  lost_hold_s: 6.0                     # hold this long after tracking loss before slowing/backing to the last good pose
+  lost_land_s: 30.0                    # localisation still lost after this long -> LAND (never falls back to ground truth)
+  grid_stale_s: 3.0                    # planning grid older than this (sensor / mapping loss) -> hover until it is live again
+  fc_link_timeout_s: 1.5               # no MAVLink HEARTBEAT / telemetry for this long -> LINK_LOST hover (the FC watchdog covers the vehicle side)
+  no_route_timeout_s: 12.0             # no A* route to the current waypoint for this long -> waypoint skipped (reported)
+  blocked_timeout_s: 12.0              # VFH+ finds no opening for this long -> waypoint skipped (reported)
+  dynamic_wait_s: null                 # OFF (safe default). If set (s): when only remembered moving-obstacle regions block the route for this long, cross them (A* cost mode). Measured with it ON (10 s): 2 of 3 dynamic runs COLLIDED with the sliding debris -> kept off ...
+  dynamic_cross_s: 60.0                # ... for this long, then block again
+  min_obstacle_dist_m: 0.7             # obstacle closer than this (vehicle radius 0.45 m + margin) -> stop and back away from it
+  retreat_speed_mps: 0.3
+  front_guard:                         # sensor-frame last-line guard: depth-image clearance in the vehicle's swept corridor ahead (independent of the SLAM pose)
+    stop_m: 1.0                        # forward clearance below this: no forward motion (hover), the obstacle may be moving / the map may be offset
+    retreat_m: 0.75                    # below this: back away along the body axis
+    max_age_s: 1.5                     # ignore a clearance measurement older than this (simulation time)
+    half_width_m: 0.6                  # corridor half width / height in the camera frame (vehicle radius 0.45 m + margin)
+    half_height_m: 0.6
+    percentile: 5.0
+
+video:
+  fps: 10
+  main_view: {width: 480, height: 270, distance_m: 4.2, height_m: 2.4, look_ahead_m: 1.2, fov_deg: 65.0}
+  size: [1280, 720]
+  output: logs/demo/disaster_demo.mp4
+  min_seconds: 60.0
+  panels: [main, map, rgb, depth, thermal]

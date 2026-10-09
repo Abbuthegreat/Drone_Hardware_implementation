@@ -1,0 +1,10 @@
+# Core (simulator, FC, MAVLink client, tests, calibration)
+pybullet>=3.2.5          # on Windows / Python >= 3.12 there is no wheel: use conda-forge (see README "Windows setup")
+numpy>=1.24
+scipy>=1.10
+opencv-python>=4.8
+PyYAML>=6.0
+pymavlink>=2.4.40
+pytest>=7.0
+onnxruntime>=1.16       # survivor detector (attached kit's YOLOv8n ONNX model)
+# ROS 2 (Humble or newer) is NOT installed by pip: install it from your OS packages (Linux) or RoboStack (Windows).
